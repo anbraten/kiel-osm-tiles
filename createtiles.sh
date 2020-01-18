@@ -1,3 +1,4 @@
 #! /bin/sh
 
-docker run -v $(pwd)/data:/srv/data -v $(pwd)/config/tilemaker:/srv/config -i -it --rm tilemaker /srv/data/kiel.osm.pbf --output=/srv/data/kiel.mbtiles --config /srv/config/config.json
+OPTIONS="/data/kiel.osm.pbf --combine 0 --output=/data/kiel.mbtiles --config /config/tilemaker.json --process /config/tilemaker.lua"
+/usr/bin/time docker run -v $(pwd)/data:/data -v $(pwd)/config:/config:ro -i -it --rm tilemaker $OPTIONS
