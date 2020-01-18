@@ -13,7 +13,8 @@ Utilitly selection to generate OpenStreeMaps vector tiles for the region of Kiel
 
 ## Single steps
 ### download.sh
-`wget` latest osm data for Schleswig-Holstein from `download.geofabrik.de`
+* `wget` latest osm data for Schleswig-Holstein from `download.geofabrik.de` 
+* admin boundaries from `https://wambachers-osm.website/boundaries`
 
 ### extract.sh
 Extract the region of Kiel from Schleswig-Holstein by using `osmconvert64` (linux)
