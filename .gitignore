@@ -3,6 +3,7 @@ data/*
 
 # exception to the rule
 !data/kiel.mbtiles
+!data/kiel.osm.pbf
 !data/schleswig-holstein-boundries.zip
 !data/fonts
 !data/styles
