@@ -1,412 +1,435 @@
--- YOU CAN NAME YOUR LAYERS WHATEVER YOU WANT
--- AS LONG AS THEY'RE NAMED THE SAME IN: CONFIG.JSON PROCESS.LUA AND JAVASCRIPT-STYLE
+-- Data processing based on openmaptiles.org schema
+-- https://openmaptiles.org/schema/
+-- Copyright (c) 2016, KlokanTech.com & OpenMapTiles contributors.
+-- Used under CC-BY 4.0
 
+--[[
 
--- https://taginfo.openstreetmap.org/keys
-node_keys = {
-  -- "Aerialway",
-  -- "Aeroway",
-  -- "Amenity",
-  -- "Barrier",
-  -- "Boundary",
-  -- "building",
-  -- "Craft",
-  -- "Emergency",
-  -- "Geological",
-  -- "Highway",
-  -- "Historic",
-  -- "Common Landuse Key Values",
-  -- "Other Landuse Key Values",
-  -- "Leisure",
-  -- "Man_made",
-  -- "Military",
-  -- "natural",
-  -- "Office",
-  "place",
-  -- "Power",
-  -- "Public Transport",
-  -- "Railway",
-  -- "Route",
-  -- "Shop",
-  -- "Sport",
-  -- "Telecom",
-  -- "Tourism",
-  -- "Waterway"
-}
+  Specific issues:
+  - aerodrome_label layer is not supported
+  - boundary layer is not supported
+  - render_min_height and render_height in buildings layer are not supported
 
--- count number of elements of each type
-G_COUNTS = {}
+  To investigate:
+  - waterway names
+  - parking, bicycle_parking
+  - stations
+  - not all POIs showing (e.g. West Oxford Community Primary School in Osney - vt2geojson shows it's in tile 14/8133/5130)
+  - low zoom levels
+  - anything in man_made?
+  - sea stuff to do
 
+  Possible fields for POIs:
+    - name: funicular
+    - name: geometry
+    - name: indoor
+    - name: information
+    - name: layer
+    - name: level
+    - name: mapping_key
+    - name: name
+    - name: name_de
+    - name: name_en
+    - name: osm_id
+    - name: religion
+    - name: sport
+    - name: station
+    - name: subclass
+    - name: tags
+    - name: uic_ref
+--]]
 
+-- Enter/exit Tilemaker
 function init_function()
 end
-
-
-local function is_in (val, tab)
-    for index, value in ipairs(tab) do
-        if value == val then
-            return true
-        end
-    end
-    return false
-end
-
-
 function exit_function()
-  -- print number of elements of each type
-  for _k,_v in pairs(G_COUNTS)
-  do
-    print("\n")
-    print(_k)
-    for k,v in pairs(_v)
-    do
-      print("\t", k, v)
-    end
-  end
 end
 
+-- Implement Sets in tables
+function Set(list)
+  local set = {}
+  for _, l in ipairs(list) do set[l] = true end
+  return set
+end
 
+-- Process node tags
+
+node_keys = { "amenity", "shop", "sport", "tourism", "place", "office", "natural", "addr:housenumber" }
 function node_function(node)
+  -- Write 'housenumber'
+  local housenumber = node:Find("addr:housenumber")
+  if housenumber~="" then
+    node:Layer("housenumber", false)
+    node:Attribute("housenumber", housenumber)
+  end
 
+  -- Write 'place'
   local place = node:Find("place")
-  local capital = node:Find("capital")
-  local admin_level = node:Find("admin_level")
-  local name = node:Find("name")
-  local aeroway = node:Find("aeroway")
-  -- local shop = node:Find("shop")
-  -- local amenity = node:Find("amenity")
+  if place ~= "" then
+    local rank = 5
 
-  -- place
-  if place ~= nil and place ~= "" then
-    node:Layer("place_label", false)
-    node:Attribute("name",name)
-    -- the main field for styling labels for different kinds of places is type.
-    -- possible values: 'city','town','village','hamlet','suburb','neighbourhood'
-    node:Attribute("type",place)
-    --The capital field allows distinct styling of labels or icons for the capitals of countries, regions, or states & provinces.
-    -- 2=National capital, 3=Regional capital (uncommon), 4=State/provincial capital
-    if capital ~="" then
-      if admin_level == 2 then
-        node:AttributeNumeric("capital",2)
-      end
-      if admin_level == 4 then
-        node:AttributeNumeric("capital",4)
-      end
+    if     place == "continent"     then rank = 1
+    elseif place == "country"       then rank = 1
+    elseif place == "state"         then rank = 1
+    elseif place == "city"          then rank = 2
+    elseif place == "town"          then rank = 3
+    elseif place == "village"       then rank = 4
+    elseif place == "suburb"        then rank = 3
+    elseif place == "neighbourhood" then rank = 4
+    elseif place == "locality"      then rank = 4 
+    elseif place == "hamlet"        then rank = 4 end
+
+    if rank <= 3 then
+      node:Layer("place", false)
+    else
+      node:Layer("place_detail", false)
     end
-    -- The value number from 0 through 9, where 0 is the large end of the scale (eg New York City).
-    -- All places other than large cities will have a scalerank of null.
-    if place == "village" then
-      node:AttributeNumeric("scalerank",3)
+    node:AttributeNumeric("rank", rank)
+    node:Attribute("class", place)
+    SetNameAttributes(node)
+    return
+  end
+
+  -- Write 'poi'
+  local rank, class, subclass = GetPOIRank(node)
+  if rank then
+    if rank <= 4 then node:Layer("poi", false)
+                 else node:Layer("poi_detail", false) end
+     node:Attribute("class", class)
+     node:Attribute("subclass", subclass)
+     node:AttributeNumeric("rank", rank)
+    poi = true
+    SetNameAttributes(node)
+    return
+  end
+
+  -- Write 'mountain_peak' and 'water_name'
+  local natural = node:Find("natural")
+  if natural == "peak" then
+    node:Layer("mountain_peak", false)
+    local ele = node:Find("ele")
+    if ele ~= "" then
+      node:AttributeNumeric("ele", tonumber(ele) or 0)
     end
-    if place == "town" then
-      node:AttributeNumeric("scalerank",5)
-    end
-    if place == "suburb" then
-      node:AttributeNumeric("scalerank",7)
-    end
-    if place == "city" then
-      node:AttributeNumeric("scalerank",9)
-    end
-    -- Therefore to reduce the label density to 4 labels per tile, you can add the filter [localrank=1].
-    node:AttributeNumeric("localrank",1)
-    -- The ldir field can be used as a hint for label offset directions at lower zoom levels.
-    node:Attribute("ldir","N")
+    node:AttributeNumeric("rank", 5)
+    SetNameAttributes(node)
+    return
+  end
+  if natural == "bay" then
+    node:Layer("water_name", false)
+    SetNameAttributes(node)
+    return
   end
 end
 
+-- Process way tags
 
--- the name "way_function" may be a little misleading at first
--- it handles not only ways, but anything that actually is a geometry of type "LINE" or "POLYGON"
--- ie. woods, parks, buildings ...
+minorRoadValues = Set { "unclassified", "residential", "road" }
+trackValues     = Set { "cycleway", "byway", "bridleway", "track" }
+pathValues      = Set { "footway", "path" }
+linkValues      = Set { "motorway_link", "trunk_link", "primary_link", "secondary_link", "tertiary_link" }
+
+aerowayBuildings= Set { "terminal", "gate", "tower" }
+landuseKeys     = Set { "school", "university", "kindergarten", "college", "library", "hospital", 
+                        "railway", "cemetery", "military", "residential", "commercial", "industrial",
+                        "retail", "stadium", "pitch", "playground", "theme_park", "bus_station", "zoo" }
+landcoverKeys   = { wood="wood", forest="wood",
+                    wetland="wetland", 
+                    beach="sand", sand="sand",
+                    farmland="farmland", farm="farmland", orchard="farmland", vineyard="farmland", plant_nursery="farmland",
+                    glacier="ice", ice_shelf="ice",
+                    grassland="grass", grass="grass", meadow="grass", allotments="grass", park="grass", village_green="grass", recreation_ground="grass", garden="grass", golf_course="grass" }
+poiTags         = { aerialway = Set { "station" },
+          amenity = Set { "arts_centre", "bank", "bar", "bbq", "bicycle_parking", "bicycle_rental", "biergarten", "bus_station", "cafe", "cinema", "clinic", "college", "community_centre", "courthouse", "dentist", "doctors", "embassy", "fast_food", "ferry_terminal", "fire_station", "food_court", "fuel", "grave_yard", "hospital", "ice_cream", "kindergarten", "library", "marketplace", "motorcycle_parking", "nightclub", "nursing_home", "parking", "pharmacy", "place_of_worship", "police", "post_box", "post_office", "prison", "pub", "public_building", "recycling", "restaurant", "school", "shelter", "swimming_pool", "taxi", "telephone", "theatre", "toilets", "townhall", "university", "veterinary", "waste_basket" },
+          barrier = Set { "bollard", "border_control", "cycle_barrier", "gate", "lift_gate", "sally_port", "stile", "toll_booth" },
+          building = Set { "dormitory" },
+          highway = Set { "bus_stop" },
+          historic = Set { "monument", "castle", "ruins" },
+          landuse = Set { "basin", "brownfield", "cemetery", "reservoir", "winter_sports" },
+          leisure = Set { "dog_park", "escape_game", "garden", "golf_course", "ice_rink", "hackerspace", "marina", "miniature_golf", "park", "pitch", "playground", "sports_centre", "stadium", "swimming_area", "swimming_pool", "water_park" },
+          railway = Set { "halt", "station", "subway_entrance", "train_station_entrance", "tram_stop" },
+          shop = Set { "accessories", "alcohol", "antiques", "art", "bag", "bakery", "beauty", "bed", "beverages", "bicycle", "books", "boutique", "butcher", "camera", "car", "car_repair", "carpet", "charity", "chemist", "chocolate", "clothes", "coffee", "computer", "confectionery", "convenience", "copyshop", "cosmetics", "deli", "delicatessen", "department_store", "doityourself", "dry_cleaning", "electronics", "erotic", "fabric", "florist", "frozen_food", "furniture", "garden_centre", "general", "gift", "greengrocer", "hairdresser", "hardware", "hearing_aids", "hifi", "ice_cream", "interior_decoration", "jewelry", "kiosk", "lamps", "laundry", "mall", "massage", "mobile_phone", "motorcycle", "music", "musical_instrument", "newsagent", "optician", "outdoor", "perfume", "perfumery", "pet", "photo", "second_hand", "shoes", "sports", "stationery", "supermarket", "tailor", "tattoo", "ticket", "tobacco", "toys", "travel_agency", "video", "video_games", "watches", "weapons", "wholesale", "wine" },
+          sport = Set { "american_football", "archery", "athletics", "australian_football", "badminton", "baseball", "basketball", "beachvolleyball", "billiards", "bmx", "boules", "bowls", "boxing", "canadian_football", "canoe", "chess", "climbing", "climbing_adventure", "cricket", "cricket_nets", "croquet", "curling", "cycling", "disc_golf", "diving", "dog_racing", "equestrian", "fatsal", "field_hockey", "free_flying", "gaelic_games", "golf", "gymnastics", "handball", "hockey", "horse_racing", "horseshoes", "ice_hockey", "ice_stock", "judo", "karting", "korfball", "long_jump", "model_aerodrome", "motocross", "motor", "multi", "netball", "orienteering", "paddle_tennis", "paintball", "paragliding", "pelota", "racquet", "rc_car", "rowing", "rugby", "rugby_league", "rugby_union", "running", "sailing", "scuba_diving", "shooting", "shooting_range", "skateboard", "skating", "skiing", "soccer", "surfing", "swimming", "table_soccer", "table_tennis", "team_handball", "tennis", "toboggan", "volleyball", "water_ski", "yoga" },
+          tourism = Set { "alpine_hut", "aquarium", "artwork", "attraction", "bed_and_breakfast", "camp_site", "caravan_site", "chalet", "gallery", "guest_house", "hostel", "hotel", "information", "motel", "museum", "picnic_site", "theme_park", "viewpoint", "zoo" },
+          waterway = Set { "dock" } }
+poiClasses      = { townhall="town_hall", public_building="town_hall", courthouse="town_hall", community_centre="town_hall",
+          golf="golf", golf_course="golf", miniature_golf="golf",
+          fast_food="fast_food", food_court="fast_food",
+          park="park", bbq="park",
+          bus_stop="bus", bus_station="bus",
+          subway_entrance="entrance", train_station_entrance="entrance",
+          camp_site="campsite", caravan_site="campsite",
+          laundry="laundry", dry_cleaning="laundry",
+          supermarket="grocery", deli="grocery", delicatessen="grocery", department_store="grocery", greengrocer="grocery", marketplace="grocery",
+          books="library", library="library",
+          university="college", college="college",
+          hotel="lodging", motel="lodging", bed_and_breakfast="lodging", guest_house="lodging", hostel="lodging", chalet="lodging", alpine_hut="lodging", dormitory="lodging",
+          chocolate="ice_cream", confectionery="ice_cream",
+          post_box="post",  post_office="post",  
+          cafe="cafe",  
+          school="school",  kindergarten="school", 
+          alcohol="alcohol_shop",  beverages="alcohol_shop",  wine="alcohol_shop",  
+          bar="bar", nightclub="bar",
+          marina="harbor", dock="harbor",
+          car="car", car_repair="car", taxi="car",
+          hospital="hospital", nursing_home="hospital",  clinic="hospital",
+          grave_yard="cemetery", cemetery="cemetery",
+          attraction="attraction", viewpoint="attraction",
+          biergarten="beer", pub="beer",
+          music="music", musical_instrument="music",
+          american_football="stadium", stadium="stadium", soccer="stadium",
+          art="art_gallery", artwork="art_gallery", gallery="art_gallery", arts_centre="art_gallery",
+          bag="clothing_store", clothes="clothing_store",
+          swimming_area="swimming", swimming="swimming",
+          castle="castle", ruins="castle" }
+poiClassRanks   = { hospital=1, railway=2, bus=3, attraction=4, harbor=5, college=6, 
+          school=7, stadium=8, zoo=9, town_hall=10, campsite=11, cemetery=12, 
+          park=13, library=14, police=15, post=16, golf=17, shop=18, grocery=19, 
+          fast_food=20, clothing_store=21, bar=22 }
+poiKeys = { "amenity", "sport", "tourism", "office", "historic", "leisure", "landuse", "information" }
+
+
 function way_function(way)
-  local layer = nil
-
-  local name = way:Find("name");
-
-  -- highway
-  local highway = way:Find("highway")
-  if highway ~= nil and highway ~= "" then
-    local class = highway
-
-    if G_COUNTS["highway"] == nil      then G_COUNTS["highway"] = {}      end
-    if G_COUNTS["highway"][class] == nil  then G_COUNTS["highway"][class] = 0    end
-
-    if is_in( class, { "motorway", "trunk", "primary", "motorway_link", "trunk_link", "primary_link" } ) then
-      layer = "road_main"
-      way:Layer(layer, false)
-      way:Attribute("class", class)
-      if name ~= nil and name ~= ""  then    way:Attribute("name",name)  end
-      G_COUNTS["highway"][class] = G_COUNTS["highway"][class] + 1
-    end
-
-    if is_in( class, { "secondary", "road", "secondary_link", "road_link" } ) then
-      layer = "road_secondary"
-      way:Layer(layer, false)
-      way:Attribute("class", class)
-      if name ~= nil and name ~= ""  then    way:Attribute("name",name)  end
-      G_COUNTS["highway"][class] = G_COUNTS["highway"][class] + 1
-    end
-
-    if is_in( class, { "tertiary", "tertiary_link" } )
-    then
-      layer = "road_tertiary"
-      way:Layer(layer, false)
-      way:Attribute("class", class)
-      if name ~= nil and name ~= ""  then    way:Attribute("name",name)  end
-      G_COUNTS["highway"][class] = G_COUNTS["highway"][class] + 1
-    end
-
-    if is_in( class, {
-              "track",
-              "proposed",
-              "service",
-              -- "planned",
-              "residential",
-              "unclassified",
-              "living_street",
-              "path",
-              -- "yes",
-              -- "services",
-              -- "raceway",
-              -- "pedestrian",
-              -- "trunk",
-              -- "corridor",
-              "crossing"
-              -- "bus_stop",
-              -- "bridleway",
-              -- "platform",
-              -- "elevator",
-              -- "footway",
-              -- "steps",
-              -- "construction",
-              -- "rest_area",
-              -- "cycleway",
-              -- "abandoned",
-              -- "no",
-          } )    then
-      layer = "road_other"
-      way:Layer(layer, false)
-      way:Attribute("class", class)
-      if name ~= nil and name ~= ""  then    way:Attribute("name",name)  end
-      G_COUNTS["highway"][class] = G_COUNTS["highway"][class] + 1
-    end
-  end
-
-  -- road_label layer
-  if highway ~= nil and highway ~= "" and name ~= "" then
-    way:Layer("road_label", false)
-    way:Attribute("name",name)
-    if way:Find("ref") ~="" then
-      way:Attribute("ref",way:Find("ref"))
-      way:AttributeNumeric("reflen", string.len(way:Find("ref")))
-    end
-    way:AttributeNumeric("osm_id",tonumber(way:Id()))
-    way:Attribute("shield","default")
-    way:AttributeNumeric("len", 100)
-    way:AttributeNumeric("localrank", 3)
-    --"class","len","localrank","name","name_de","name_en","name_es","name_fr","name_ru","name_zh","osm_id","ref","reflen","shield"
-    --way:AttributeBoolean("oneway": "false")
-    if highway=="residential" then way:Attribute("class","street") end
-    if highway=="primary" or highway=="secondary" or highway=="tertiary" then
-        way:Attribute("class","main")
-    end
-    if highway=="primary_link" or highway=="secondary_link" then
-      way:Attribute("class","street")
-    end
-  end
-
-
-  -- -- route
-  -- local route = way:Find("route")
-  -- if route ~= nil and route ~= "" then
-  --   local class = route
-
-  --   if G_COUNTS["route"] == nil      then G_COUNTS["route"] = {}        end
-  --   if G_COUNTS["route"][class] == nil  then G_COUNTS["route"][class] = 0    end
-
-  --   -- if is_in( class, { "wood", "scrub", "heath", "grassland", "fell", "bare_rock", "scree", "shingle", "sand", "mud" } )
-  --   layer = "route"
-  --   way:Layer(layer, false)
-  --   way:Attribute("class", class)
-  --   G_COUNTS["route"][class] = G_COUNTS["route"][class] + 1
-  -- end
-
-  -- building
-  local building = way:Find("building")
-  if building ~= nil and building ~= "" then
-    local class = building
-
-    if G_COUNTS["building"] == nil      then G_COUNTS["building"] = {}        end
-    if G_COUNTS["building"][class] == nil  then G_COUNTS["building"][class] = 0    end
-
-    layer = "building"
-    way:Layer(layer, true)
-    way:Attribute("class", class)
-    if name ~= nil and name ~= ""  then    way:Attribute("name",name)  end
-    G_COUNTS["building"][class] = G_COUNTS["building"][class] + 1
-  end
-
-  -- landuse
-  local landuse = way:Find("landuse")
-  if landuse ~= nil and landuse ~= "" then
-    local class = landuse
-
-    if G_COUNTS["landuse"] == nil      then G_COUNTS["landuse"] = {}      end
-    if G_COUNTS["landuse"][class] == nil  then G_COUNTS["landuse"][class] = 0    end
-
-    -- if is_in( class, { "wood", "scrub", "heath", "grassland", "fell", "bare_rock", "scree", "shingle", "sand", "mud" } )
-    layer = "landuse"
-    way:Layer(layer, true)
-    way:Attribute("class", class)
-    if name ~= nil and name ~= ""  then    way:Attribute("name",name)  end
-    G_COUNTS["landuse"][class] = G_COUNTS["landuse"][class] + 1
-  end
-
-  -- Natural
-  local natural = way:Find("natural")
-  if natural ~= nil and natural ~= "" then
-    local class = natural
-
-    if G_COUNTS["natural"] == nil      then G_COUNTS["natural"] = {}      end
-    if G_COUNTS["natural"][class] == nil  then G_COUNTS["natural"][class] = 0    end
-
-    -- if is_in( class, { "wood", "forest", "scrub", "heath", "grassland", "fell", "bare_rock", "scree", "shingle", "sand", "mud" } )
-    if is_in( class, { "wood", "forest", "scrub" } ) then -- just higher trees
-      layer = "wood"
-      way:Layer(layer, true)
-      way:Attribute("class", class)
-      if name ~= nil and name ~= ""  then    way:Attribute("name",name)  end
-      G_COUNTS["natural"][class] = G_COUNTS["natural"][class] + 1
-    elseif is_in( class, { "heath", "grassland", "fell" } ) then
-      layer = "bush"
-      way:Layer(layer, true)
-      way:Attribute("class", class)
-      if name ~= nil and name ~= ""  then    way:Attribute("name",name)  end
-      G_COUNTS["natural"][class] = G_COUNTS["natural"][class] + 1
-    elseif is_in( class, { "bare_rock", "scree", "shingle", "sand", "meadow" } ) then
-      layer = "soil"
-      way:Layer(layer, true)
-      way:Attribute("class", class)
-      if name ~= nil and name ~= ""  then    way:Attribute("name",name)  end
-      G_COUNTS["natural"][class] = G_COUNTS["natural"][class] + 1
-    elseif is_in( class, { "water", "wetland", "bay" } )then
-      layer = "water"
-      way:Layer(layer, true)
-      way:Attribute("class", class)
-      if name ~= nil and name ~= ""  then    way:Attribute("name",name)  end
-      G_COUNTS["natural"][class] = G_COUNTS["natural"][class] + 1
-    elseif is_in( class, { "mud" } )then
-      layer = "mud"
-      way:Layer(layer, true)
-      way:Attribute("class", class)
-      if name ~= nil and name ~= ""  then    way:Attribute("name",name)  end
-      G_COUNTS["natural"][class] = G_COUNTS["natural"][class] + 1
-    else
-      layer = "natural_other"
-      way:Layer(layer, true)
-      way:Attribute("class", class)
-      if name ~= nil and name ~= ""  then    way:Attribute("name",name)  end
-      G_COUNTS["natural"][class] = G_COUNTS["natural"][class] + 1
-    end
-  end
-
-  -- waterway
+  local highway  = way:Find("highway")
   local waterway = way:Find("waterway")
-  if waterway ~= nil and waterway ~= "" then
-    local class = waterway
+  local building = way:Find("building")
+  local natural  = way:Find("natural")
+  local historic = way:Find("historic")
+  local landuse  = way:Find("landuse")
+  local leisure  = way:Find("leisure")
+  local amenity  = way:Find("amenity")
+  local aeroway  = way:Find("aeroway")
+  local railway  = way:Find("railway")
+  local sport    = way:Find("sport")
+  local shop     = way:Find("shop")
+  local tourism  = way:Find("tourism")
+  local man_made = way:Find("man_made")
+  local isClosed = way:IsClosed()
+  local housenumber = way:Find("addr:housenumber")
+  local write_name = false
 
-    if G_COUNTS["waterway"] == nil      then G_COUNTS["waterway"] = {}      end
-    if G_COUNTS["waterway"][class] == nil  then G_COUNTS["waterway"][class] = 0    end
+  -- Miscellaneous preprocessing
+  if way:Find("disused") == "yes" then return end
+  if highway == "proposed" then return end
+  if aerowayBuildings[aeroway] then building="yes"; aeroway="" end
+  if landuse == "field" then landuse = "farmland" end
+  if landuse == "meadow" and way:Find("meadow")=="agricultural" then landuse="farmland" end
 
-    -- if is_in( class, { "yes", "water", "river", "riverbank", "stream", "reservoir", "moat", "pond", "canal" } )
-    if is_in( class, { "yes", "water", "riverbank", "reservoir", "moat", "pond", "canal" } ) then
-      layer = "water"
-      way:Layer(layer, true)
-      way:Attribute("class", class)
-      if name ~= nil and name ~= ""  then    way:Attribute("name",name)  end
-      G_COUNTS["waterway"][class] = G_COUNTS["waterway"][class] + 1
-    elseif is_in( class, { "river", "stream", "canal" } )  then
-      layer = "river"
-      way:Layer(layer, false)
-      way:Attribute("class", class)
-      if name ~= nil and name ~= ""  then    way:Attribute("name",name)  end
-      G_COUNTS["waterway"][class] = G_COUNTS["waterway"][class] + 1
-    end
-  end
-
-
-  -- aeroway
-  local aeroway = way:Find("aeroway")
-  if aeroway ~= nil and aeroway ~= "" then
-    local class = aeroway
-
-    if G_COUNTS["aeroway"] == nil      then G_COUNTS["aeroway"] = {}      end
-    if G_COUNTS["aeroway"][class] == nil  then G_COUNTS["aeroway"][class] = 0    end
-
-    if is_in( class, { "aerodrome", "apron"} )then
-      layer = "aeroway"
-      way:Layer(layer, true)
-      way:Attribute("class", class)
-      if name ~= nil and name ~= ""  then    way:Attribute("name",name)  end
-      G_COUNTS["aeroway"][class] = G_COUNTS["aeroway"][class] + 1
-    else
-      layer = "aeroway_other"
-      way:Layer(layer, true)
-      way:Attribute("class", class)
-      if name ~= nil and name ~= ""  then    way:Attribute("name",name)  end
-      G_COUNTS["aeroway"][class] = G_COUNTS["aeroway"][class] + 1
-    end
-  end
-
-
-  -- boundary
-  -- local boundary = way:Find("boundary")
-  -- if boundary ~= nil and boundary == "administrative" then
-  --   local class = boundary
-  --   local admin_level = way:Find("admin_level")
-
-  --   if G_COUNTS["admin_level"] == nil      then G_COUNTS["admin_level"] = {}      end
-
-
-  --   if admin_level ~= nil and admin_level ~= ""  then
-
-  --     if G_COUNTS["boundary"] == nil      then G_COUNTS["boundary"] = {}      end
-  --     if G_COUNTS["boundary"][class] == nil  then G_COUNTS["boundary"][class] = 0    end
-
-  --     if G_COUNTS["admin_level"][admin_level] == nil then G_COUNTS["admin_level"][admin_level] = 0 end
-  --     G_COUNTS["admin_level"][admin_level] = G_COUNTS["admin_level"][admin_level] + 1
-
-
-  --     layer = "admin"
-  --     way:Layer(layer, false)
-  --     way:Attribute("class", class)
-  --     if name ~= nil and name ~= ""  then
-  --       way:Attribute("name",name)
-  --     end
-
-  --     way:AttributeNumeric("admin_level", admin_level)
-
-  --     G_COUNTS["boundary"][class] = G_COUNTS["boundary"][class] + 1
-  --   end -- admin level
-  -- end
-
-  -- railway
-  local railway = way:Find("railway")
-  if railway ~= nil and railway == "rail" then
-    local class = railway
-
-    if G_COUNTS["railway"] == nil      then G_COUNTS["railway"] = {}      end
-    if G_COUNTS["railway"][class] == nil  then G_COUNTS["railway"][class] = 0    end
-
-    layer = "railway"
+  -- Roads ('transportation' and 'transportation_name', plus 'transportation_name_detail')
+  if highway~="" then
+    local h = highway
+    local layer = "transportation"
+    if minorRoadValues[highway] then h = "minor"; layer="transportation_mid" end
+    if trackValues[highway]     then h = "track"; layer="transportation_detail" end
+    if pathValues[highway]      then h = "path" ; layer="transportation_detail" end
+    if h=="service" then layer="transportation_detail" end
     way:Layer(layer, false)
-    way:Attribute("class", class)
-    -- if name ~= nil and name ~= ""  then    way:Attribute("name",name)  end
-    G_COUNTS["railway"][class] = G_COUNTS["railway"][class] + 1
+    way:Attribute("class", h)
+    SetBrunnelAttributes(way)
+
+    -- Service
+    local service = way:Find("service")
+    if highway == "service" and service ~="" then way:Attribute("service", service) end
+
+    -- Links (ramp)
+    if linkValues[highway] then 
+      splitHighway = split(highway, "_")
+      highway = splitHighway[1]
+      way:AttributeNumeric("ramp",1)
+    end
+
+    local oneway = way:Find("oneway")
+    if oneway == "yes" or oneway == "1" then
+      way:AttributeNumeric("oneway",1)
+    end
+    if oneway == "-1" then
+      -- **** TODO
+    end
+
+    -- Write names
+    if h == "minor" or h == "track" or h == "path" or h == "service" then
+      way:Layer("transportation_name_detail", false)
+    else
+      way:Layer("transportation_name", false)
+    end
+    SetNameAttributes(way)
+    way:Attribute("class",h)
+    way:Attribute("network","road") -- **** needs fixing
+    if h~=highway then way:Attribute("subclass",highway) end
+    local ref = way:Find("ref")
+    if ref~="" then
+      way:Attribute("ref",ref)
+      way:AttributeNumeric("ref_length",ref:len())
+    end
+  end
+  
+  -- Railways ('transportation' and 'transportation_name', plus 'transportation_name_detail')
+  if railway~="" then
+    way:Layer("transportation", false)
+    way:Attribute("class", railway)
+
+    way:Layer("transportation_name", false)
+    SetNameAttributes(way)
+    way:Attribute("class", "rail")
+  end
+  
+  -- 'Aeroway'
+  if aeroway~="" then
+    way:Layer("aeroway", isClosed)
+    way:Attribute("class",aeroway)
+    way:Attribute("ref",way:Find("ref"))
+    write_name = true
+  end
+  
+
+  -- Set 'waterway' and associated
+  if waterway~="" then
+    if     waterway == "riverbank" then way:Layer("water",   isClosed); way:Attribute("class", "river");
+                                        if way:Find("intermittent")=="yes" then way:AttributeNumeric("intermittent",1) end
+    elseif waterway == "dock"      then way:Layer("water",   isClosed); way:Attribute("class", "lake"); 
+                                        way:LayerAsCentroid("water_name_detail"); SetNameAttributes(way); write_name = true
+    elseif waterway == "boatyard"  then way:Layer("landuse", isClosed); way:Attribute("class", "industrial")
+    elseif waterway == "dam"       then way:Layer("building",isClosed)
+    elseif waterway == "fuel"      then way:Layer("landuse", isClosed); way:Attribute("class", "industrial")
+    else
+      way:Layer("waterway",false)
+      way:Attribute("class", waterway)
+      SetNameAttributes(way)
+      SetBrunnelAttributes(way)
+    end
   end
 
-  if layer == nil then
-    -- way:Layer("default", false)
+  -- Set 'building' and associated
+  if building~="" then way:Layer("building", true) end
+
+  -- Set 'housenumber'
+  if housenumber~="" then
+    way:LayerAsCentroid("housenumber", false)
+    way:Attribute("housenumber", housenumber)
+  end
+  
+  -- Set 'water'
+  if natural=="water" or natural=="bay" or landuse=="reservoir" then
+    if way:Find("covered")=="yes" then return end
+    local class="lake"; if natural=="bay" then class="ocean" end
+    way:Layer("water", true)
+    way:Attribute("class",class)
+    if way:Find("intermittent")=="yes" then way:Attribute("intermittent",1) end
+    if way:Holds("name") then
+      way:LayerAsCentroid("water_name_detail")
+      SetNameAttributes(way)
+      way:Attribute("class", class)
+    end
+    return -- in case we get any landuse processing
   end
 
+  -- Set 'landcover' (from landuse, natural, leisure)
+  local l = landuse
+  if l=="" then l=natural end
+  if l=="" then l=leisure end
+  if landcoverKeys[l] then
+    way:Layer("landcover", true)
+    way:Attribute("class", landcoverKeys[l])
+    if l=="wetland" then way:Attribute("subclass", way:Find("wetland"))
+    else way:Attribute("subclass", l) end
+    SetNameAttributes(way)
+    write_name = true
+
+  -- Set 'landuse'
+  else
+    if l=="" then l=amenity end
+    if l=="" then l=tourism end
+    if landuseKeys[l] then
+      way:Layer("landuse", true)
+      way:Attribute("class", l)
+      SetNameAttributes(way)
+      write_name = true
+    end
+  end
+
+  -- Parks
+  -- **** name?
+  if     boundary=="national_park" then way:Layer("park",true); way:Attribute("class",boundary); SetNameAttributes(way)
+  elseif leisure=="nature_reserve" then way:Layer("park",true); way:Attribute("class",leisure ); SetNameAttributes(way) end
+
+  -- POIs ('poi' and 'poi_detail')
+  local rank, class, subclass = GetPOIRank(way)
+  if rank and WriteNamedPOI(way,class,subclass,rank) then write_name=false end
+
+  -- Catch-all
+  if (building~="" or write_name) and way:Holds("name") then
+    way:LayerAsCentroid("poi_detail")
+    SetNameAttributes(way)
+    if write_name then rank=6 else rank=25 end
+    way:AttributeNumeric("rank", rank)
+  end
+end
+
+-- ==========================================================
+-- Common functions
+
+-- Write a way centroid with name to POI layer
+function WriteNamedPOI(obj,class,subclass,rank)
+  if obj:Holds("name") then
+    local layer = "poi"
+    if rank>4 then layer="poi_detail" end
+    obj:LayerAsCentroid(layer)
+    SetNameAttributes(obj)
+    obj:AttributeNumeric("rank", rank)
+    obj:Attribute("class", class)
+    obj:Attribute("subclass", subclass)
+    return true
+  end
+  return false
+end
+
+-- Set name, name_en, and name_de on any object
+function SetNameAttributes(obj)
+  obj:Attribute("name:latin", obj:Find("name"))
+  -- **** do transliteration
+end
+
+function SetBrunnelAttributes(obj)
+  if     obj:Find("bridge") == "yes" then obj:Attribute("brunnel", "bridge")
+  elseif obj:Find("tunnel") == "yes" then obj:Attribute("brunnel", "tunnel")
+  elseif obj:Find("ford")   == "yes" then obj:Attribute("brunnel", "ford")
+  end
+end
+
+-- Calculate POIs (typically rank 1-4 go to 'poi' z12-14, rank 5+ to 'poi_detail' z14)
+-- returns rank, class, subclass
+function GetPOIRank(obj)
+  local k,list,v,class,rank
+  
+  -- Can we find the tag?
+  for k,list in pairs(poiTags) do
+    if list[obj:Find(k)] then
+      v = obj:Find(k)  -- k/v are the OSM tag pair
+      class = poiClasses[v] or v
+      rank  = poiClassRanks[class] or 25
+      return rank, class, v
+    end
+  end
+
+  -- Catch-all for shops
+  local shop = obj:Find("shop")
+  if shop~="" then return poiClassRanks['shop'], shop, shop end
+
+  -- Nothing found
+  return nil,nil,nil
+end
+
+-- ==========================================================
+-- Lua utility functions
+
+function split(inputstr, sep) -- https://stackoverflow.com/a/7615129/4288232
+  if sep == nil then
+    sep = "%s"
+  end
+  local t={} ; i=1
+  for str in string.gmatch(inputstr, "([^"..sep.."]+)") do
+    t[i] = str
+    i = i + 1
+  end
+  return t
 end

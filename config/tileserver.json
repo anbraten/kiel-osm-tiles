@@ -4,19 +4,23 @@
       "root": "/data",
       "fonts": "fonts",
       "styles": "styles",
+      "sprites": "styles",
       "mbtiles": ""
     },
     "serveStaticMaps": true,
-    "formatQuality": {
-      "jpeg": 90,
-      "webp": 90
-    },
-    "maxSize": 8192,
     "pbfAlias": "pbf"
   },
   "styles": {
     "basic": {
-      "style": "basic.json",
+      "style": "basic/style.json",
+      "serve_rendered": false,
+      "serve_data": true,
+      "tilejson": {
+        "bounds": [9.86,54.22,10.47,54.52]
+      }
+    },
+    "dark": {
+      "style": "dark/style.json",
       "serve_rendered": false,
       "serve_data": true,
       "tilejson": {

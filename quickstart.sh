@@ -9,7 +9,7 @@ echo "[2/3] Extracting Kiel from Schleswig-Holstein data ..."
 ./extract.sh
 
 echo "[3/3] Generating vector tiles for Kiel ..."
-# ./createtiles.sh
+./createtiles.sh
 
 echo
 echo "Done!"
